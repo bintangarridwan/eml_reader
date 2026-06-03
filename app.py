@@ -82,6 +82,10 @@ def _extract_attachments(msg: Message) -> list[dict]:
         except Exception:
             data = b""
 
+        # Limit attachment size to 30MB
+        if len(data) > 30 * 1024 * 1024:
+            continue
+
         items.append(
             {
                 "filename": filename,
@@ -101,6 +105,33 @@ def _html_to_text(html: str) -> str:
     text = soup.get_text("\n")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+def _sanitize_html(html: str) -> str:
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+    
+    # Remove dangerous elements
+    dangerous_tags = [
+        "script", "iframe", "object", "embed", "link", "meta", "applet", 
+        "base", "form", "input", "button", "textarea", "select"
+    ]
+    for tag in soup(dangerous_tags):
+        tag.decompose()
+        
+    # Remove event handlers and block javascript/data URIs in src/href
+    for tag in soup.find_all(True):
+        attrs = list(tag.attrs.keys())
+        for attr in attrs:
+            if attr.lower().startswith("on"):
+                del tag.attrs[attr]
+            elif attr.lower() in ["href", "src"]:
+                val = str(tag.attrs[attr]).strip().lower()
+                if val.startswith("javascript:") or val.startswith("data:"):
+                    tag.attrs[attr] = "#"
+                    
+    return str(soup)
 
 
 def _fmt_size(n: int) -> str:
@@ -209,7 +240,7 @@ def _render_attachment_preview(att: dict) -> None:
             st.markdown(f"**Date:** {nested.get('Date') or ''}")
             t, h = _pick_best_bodies(nested)
             if h:
-                st.components.v1.html(h, height=480, scrolling=True)
+                st.components.v1.html(_sanitize_html(h), height=480, scrolling=True)
             elif t:
                 st.text_area("Body", value=t, height=420)
             else:
@@ -774,7 +805,7 @@ with col_read:
 
         with body_tab_html:
             if html_body:
-                st.components.v1.html(html_body, height=600, scrolling=True)
+                st.components.v1.html(_sanitize_html(html_body), height=600, scrolling=True)
             else:
                 st.caption("Tidak ada body HTML.")
 
